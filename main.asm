@@ -1,5 +1,11 @@
 ; original File = dcc_func_wagon.HEX
 
+#undefine OptimizationFix1
+#undefine OptimizationFix2
+#undefine ProgrammingLock
+
+; original File = Z:\home\sdedic\vlacky\FuncDec.X\dcc_func_wagon.HEX
+
     processor 12F629
     #include "p12f629.inc"
     __config 0x3FC4
@@ -294,7 +300,16 @@ Process_Command:
     ; OPTIMIZATION: can save bytes; the following checks if LRAM_0x40 < 4, if so,
     ; it jumps with the value to Read_Effect; otherwise just returns the value.
 LADR_0x006A:
-    MOVF LRAM_0x40,W
+    MOVF LRAM_0x40,W	 
+#ifdef OptimizationFix2
+    ADDLW 0xFC		 ; 0x00 .. 0x03 does not overflow
+    BTFSS STATUS,C
+    GOTO Read_Effect
+    ADDLW 0xF8		 ; 0x0c + 0xfc = 0x08. Original 0x00..0x0b does NOT overflow
+    BTFSS STATUS,C	 ; LRAM_0x40 = 0x0c
+    RETURN
+    ; 7 instructions
+#else
     ADDWF PCL,F          ; !!Program-Counter-Modification           ADDLW   0xFC
     GOTO Read_Effect     ; 0x00                                     BTFSS   STATUS,C
     GOTO Read_Effect     ; 0x01                                     GOTO    Read_Effect
@@ -310,6 +325,7 @@ LADR_0x006A:
     RETURN               ; 0x0b                                     ; save6
     ; 14 instructions
     ; 0x0c
+#endif
     MOVLW 0xFF           ; NOTE: 0xFF will be INCREMENTED aftr return to 0.
     MOVWF LRAM_0x40
     DECFSZ FLASH_A_COUNTER,F
@@ -686,6 +702,17 @@ Set_PageRegister:
     MOVWF Maybe_PAGEREG
     RETURN
 Verify_PageReg:
+#ifdef ProgrammingLock
+    MOVWF   TEMP_VAR		; save CV number
+    MOVF    CV15,W		; load CV15, check for zero
+    BTFSC   STATUS,Z
+    GOTO    Verify_Pagereg_Unlocked	; Ignore lock if CV15 = 0
+    XORWF   CV16,W
+    BTFSS   STATUS,Z		; skip if CV15 = CV16, otherwise raise ignore flag
+    RETURN
+Verify_Pagereg_Unlocked:
+    MOVF   TEMP_VAR, W
+#endif
     XORWF Maybe_PAGEREG,W
     GOTO ACK_If_Zero
 LADR_0x01BF
@@ -789,7 +816,20 @@ Service_BitVerify_0:
 Write_CV_Start:
     BCF IGNORE_CV_FLAG
     BCF RESCV_FLAG
-    MOVWF TEMP_VAR
+    MOVWF   TEMP_VAR
+#ifdef ProgrammingLock
+    XORLW   14
+    BTFSC   STATUS,Z
+    GOTO    Write_CV_Unlocked	; CV15 can be always written to
+    MOVF    CV15,W		; load CV15, check for zero
+    BTFSC   STATUS,Z
+    GOTO    Write_CV_Unlocked	; Ignore lock if CV15 = 0
+    XORWF   CV16,W
+    BTFSS   STATUS,Z		; skip if CV15 = CV16, otherwise raise ignore flag
+    BSF IGNORE_CV_FLAG
+Write_CV_Unlocked:
+    MOVF    TEMP_VAR,W
+#endif
     BTFSS TEMP_VAR,7    
     BTFSC TEMP_VAR,6
     GOTO Check_High_CV_Addr     ; CVs > 0x3F (64 +)
@@ -867,7 +907,13 @@ Reset_CVs:
     MOVWF EEPROM_WRITE_START
     MOVLW 0x3A           ;   b'00111010'  d'058'  ":"
     CALL Fill_eeprom_bytes
-
+#ifdef ProgrammingLock
+    MOVLW EEPROM_CV15
+    MOVWF EEPROM_WRITE_START
+    MOVLW 2
+    CALL Fill_eeprom_bytes  ; erase the decoder lock (both bytes to 0)
+#endif
+    
     ; Write 1
     INCF EEDATA0,F
     MOVLW 0x40           ;   b'01000000'  d'064'  "@"
@@ -908,6 +954,14 @@ LoadAddress:
     MOVLW EEPROM_CV29
     CALL EE_Read         ; Read EEPROM(0x1C)
     MOVWF CV29
+#ifdef ProgrammingLock
+    MOVLW EEPROM_CV15
+    CALL EE_Read
+    MOVWF CV15
+    MOVLW EEPROM_CV16
+    CALL EE_Read
+    MOVWF CV16
+#endif
     RETURN
 Fill_eeprom_bytes:
     MOVWF FUNCTION_ID
@@ -968,6 +1022,38 @@ Sub_Function_Bits:
     ; FSR + INDF (0x036 - 0x038). Increment at the start of the loop. End when
     ; FSR bit #3 is set = 0x038
     ; 29 instrs. vs. 72 instrs.
+#ifdef OptimizationFix1
+    MOVLW   0x35
+    MOVWF   FSR
+Next_Function_Group:
+    INCF    FSR,F
+    INCF FUNCTION_ID,F   ; F5
+    BTFSC INDF,0
+    CALL Load_Function_Cfg
+    INCF FUNCTION_ID,F   ; F6
+    BTFSC INDF,1
+    CALL Load_Function_Cfg
+    INCF FUNCTION_ID,F   ; F7
+    BTFSC INDF,2
+    CALL Load_Function_Cfg
+    INCF FUNCTION_ID,F   ; F8
+    BTFSC INDF,3
+    CALL Load_Function_Cfg
+    INCF FUNCTION_ID,F   ; F9
+    BTFSC INDF,4
+    CALL Load_Function_Cfg
+    INCF FUNCTION_ID,F   ; F10
+    BTFSC INDF,5
+    CALL Load_Function_Cfg
+    INCF FUNCTION_ID,F   ; F11
+    BTFSC INDF,6
+    CALL Load_Function_Cfg
+    INCF FUNCTION_ID,F   ; F12
+    BTFSC INDF,7
+    CALL Load_Function_Cfg
+    BTFSS  FSR,3
+    GOTO   Next_Function_Group
+#else
     INCF FUNCTION_ID,F   ; F5
     BTFSC LRAM_0x36,0
     CALL Load_Function_Cfg
@@ -1040,6 +1126,7 @@ Sub_Function_Bits:
     INCF FUNCTION_ID,F   ; F28
     BTFSC LRAM_0x38,7
     CALL Load_Function_Cfg
+#endif
 
     INCF FUNCTION_ID,F   ; F29 :)) == Stop FWD/BWD
     MOVF SPEED,W
