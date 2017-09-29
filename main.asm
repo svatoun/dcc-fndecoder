@@ -1,8 +1,8 @@
 ; original File = dcc_func_wagon.HEX
 
-#undefine OptimizationFix1
-#undefine OptimizationFix2
-#undefine ProgrammingLock
+#define OptimizationFix1
+#define OptimizationFix2
+#define ProgrammingLock
 
 ; original File = Z:\home\sdedic\vlacky\FuncDec.X\dcc_func_wagon.HEX
 
@@ -14,8 +14,8 @@
 
 ;   EEPROM-Data
     Org 0x2100
-    DE 0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x1E, 0x0D   ;  ........
-    DE 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x03, 0xFF, 0xFF   ;  ........
+    DE 0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x1E, 0x4A   ;  ........
+    DE 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x03, 0x00, 0x00   ;  ........
     DE 0xC0, 0x64, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF   ;  .d......
     DE 0xFF, 0xFF, 0xFF, 0xFF, 0x06, 0xFF, 0xFF, 0xFF   ;  ........
     DE 0x00, 0x00, 0x00, 0x00, 0x0F, 0x0F, 0x0F, 0x0F   ;  ........
@@ -131,8 +131,11 @@ CV1 equ 0x50
 CV17 equ 0x51
 CV18 equ 0x52
 CV29 equ 0x53
+
+ #ifdef ProgrammingLock
 CV15 equ 0x54
 CV16 equ 0x55
+ #endif
 
 TEMP_VAR equ 0x59	; temporary variable, saving intermediate results
 FUNCTION_ID equ 0x5A
@@ -303,6 +306,7 @@ LADR_0x006A:
     MOVF LRAM_0x40,W	 
 #ifdef OptimizationFix2
     ADDLW 0xFC		 ; 0x00 .. 0x03 does not overflow
+    MOVF LRAM_0x40,W
     BTFSS STATUS,C
     GOTO Read_Effect
     ADDLW 0xF8		 ; 0x0c + 0xfc = 0x08. Original 0x00..0x0b does NOT overflow
@@ -818,7 +822,7 @@ Write_CV_Start:
     BCF RESCV_FLAG
     MOVWF   TEMP_VAR
 #ifdef ProgrammingLock
-    XORLW   14
+    XORLW   0x0E		; CV 15 (-1)
     BTFSC   STATUS,Z
     GOTO    Write_CV_Unlocked	; CV15 can be always written to
     MOVF    CV15,W		; load CV15, check for zero
